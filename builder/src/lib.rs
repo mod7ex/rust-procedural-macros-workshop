@@ -17,11 +17,6 @@ use syn::{
     GenericArgument, parse2
 };
 
-// https://youtu.be/geovSK3wMB8?t=7073
-// https://www.youtube.com/watch?v=KVWHT1TAirU&ab_channel=JonGjengset
-
-// https://users.rust-lang.org/t/syn-how-do-i-iterate-on-the-fields-of-a-struct/42600?u=modex98
-
 fn is_optional(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty {
         if let Some(segment) = type_path.path.segments.last() {
