@@ -17,7 +17,7 @@ use syn::{
     GenericArgument, parse2
 };
 
-// https://youtu.be/geovSK3wMB8?t=6947
+// https://youtu.be/geovSK3wMB8?t=7073
 // https://www.youtube.com/watch?v=KVWHT1TAirU&ab_channel=JonGjengset
 
 // https://users.rust-lang.org/t/syn-how-do-i-iterate-on-the-fields-of-a-struct/42600?u=modex98
@@ -68,11 +68,10 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
             for attr in &f.attrs {
                 if let Some(TokenTree::Group(group)) = attr.to_token_stream().clone().into_iter().last() {
                     let mut tts = group.stream().into_iter();
-                    let tt_ident = tts.next().unwrap().to_token_stream();
-                    let ident = parse2::<Ident>(tt_ident).unwrap();
+                    let ts_ident = tts.next().unwrap().to_token_stream();
+                    let ident = parse2::<Ident>(ts_ident).unwrap();
                     if ident.to_string() == "builder"  {
                         if let TokenTree::Group(group) = tts.next().unwrap() {
-                            // TODO; make sure you understood correctly
                             if group.delimiter() != Delimiter::Parenthesis {
                                 panic!("Wrong usage use parenthesis");
                             }
@@ -90,12 +89,13 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
                             }
 
                             let literal = parse2::<Literal>(stream_iter.next().unwrap().to_token_stream()).unwrap();
-
                             let literal_str = &literal.to_string().replace("\"", "");
-                            let expected_literal = &f.ident.to_token_stream().to_string();
-                            if &format!("{}s", literal_str) != expected_literal && literal_str != expected_literal {
-                                panic!("Wrong usage wrong field name in attr");
-                            }
+                            /*
+                                let expected_literal = &f.ident.to_token_stream().to_string();
+                                if &format!("{}s", literal_str) != expected_literal && literal_str != expected_literal {
+                                    panic!("Wrong usage wrong field name in attr");
+                                }
+                            */
                             method_ident = Ident::new(literal_str, f.span().clone());
                             spreadable = true;
                         } else {
@@ -127,8 +127,8 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
         });
 
         entity_builder_implementation.extend({
-            let m_ty = generic(ty, "Vec");
             if spreadable {
+                let m_ty = generic(ty, "Vec");
                 quote! {
                     pub fn #method_ident(&mut self, v: #m_ty) -> &mut Self {
                         if let Some(prev) = self.#field_ident.as_mut() {
