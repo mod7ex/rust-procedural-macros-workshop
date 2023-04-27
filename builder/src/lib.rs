@@ -1,6 +1,6 @@
 use core::panic;
 
-use proc_macro2::{TokenTree, Delimiter, Punct, Literal};
+use proc_macro2::{TokenTree, Delimiter};
 use quote::{quote, ToTokens};
 use proc_macro::TokenStream;
 use syn::{
@@ -14,7 +14,8 @@ use syn::{
     spanned::Spanned,
     Type,
     PathArguments,
-    GenericArgument, parse2
+    GenericArgument,
+    Lit
 };
 
 fn is_optional(ty: &Type) -> bool {
@@ -28,7 +29,7 @@ fn is_optional(ty: &Type) -> bool {
     false
 }
 
-fn generic<'a>(ty: &'a Type, target: &'a str) -> &'a Type {
+fn generic<'a>(ty: &'a Type, target: &str) -> &'a Type {
     if let Type::Path(type_path) = ty {
         if let Some(segment) = type_path.path.segments.last() {
             let ident = &segment.ident;
@@ -60,44 +61,52 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
         named.iter().map(|f| {
             let mut spreadable = false;
             let mut method_ident = f.ident.clone().unwrap();
+
             for attr in &f.attrs {
-                if let Some(TokenTree::Group(group)) = attr.to_token_stream().clone().into_iter().last() {
-                    let mut tts = group.stream().into_iter();
-                    let ts_ident = tts.next().unwrap().to_token_stream();
-                    let ident = parse2::<Ident>(ts_ident).unwrap();
-                    if ident.to_string() == "builder"  {
-                        if let TokenTree::Group(group) = tts.next().unwrap() {
-                            if group.delimiter() != Delimiter::Parenthesis {
-                                panic!("Wrong usage use parenthesis");
+                if let Some(TokenTree::Group(group)) = attr.to_token_stream().into_iter().last() {
+
+                    let mut attr_tts = group.stream().into_iter();
+
+                    match attr_tts.next().unwrap() {
+                        TokenTree::Ident(v) => {
+                            if v.to_string() != "builder" {
+                                continue;
                             }
+                        }
+                        _ => {}
+                    }
 
-                            let mut stream_iter = group.stream().into_iter();
+                    if let TokenTree::Group(group) = attr_tts.next().unwrap() {
+                        if group.delimiter() != Delimiter::Parenthesis {
+                            panic!("Wrong usage, use parenthesis");
+                        }
 
-                            let inert_ident = parse2::<Ident>(stream_iter.next().unwrap().to_token_stream()).unwrap();
-                            if inert_ident.to_string() != "each" {
-                                panic!("Wrong usage inert ident should be \"each\"");
-                            }
+                        let mut stream_iter = group.stream().into_iter();
 
-                            let punct = parse2::<Punct>(stream_iter.next().unwrap().to_token_stream()).unwrap();
-                            if punct.as_char() != '=' {
-                                panic!("Wrong usage punct should be '='");
-                            }
+                        match stream_iter.next().unwrap() {
+                            TokenTree::Ident(ref i) => assert_eq!(i.to_string(), "each"),
+                            x => panic!("Expected \"each\" found {}", x)
+                        }
 
-                            let literal = parse2::<Literal>(stream_iter.next().unwrap().to_token_stream()).unwrap();
-                            let literal_str = &literal.to_string().replace("\"", "");
-                            /*
-                                let expected_literal = &f.ident.to_token_stream().to_string();
-                                if &format!("{}s", literal_str) != expected_literal && literal_str != expected_literal {
-                                    panic!("Wrong usage wrong field name in attr");
-                                }
-                            */
-                            method_ident = Ident::new(literal_str, f.span().clone());
-                            spreadable = true;
-                        } else {
-                            panic!("Wrong usage");
+                        match stream_iter.next().unwrap() {
+                            TokenTree::Punct(ref i) => assert_eq!(i.as_char(), '='),
+                            x => panic!("Expected '=' found {}", x)
+                        }
+
+                        let literal = match stream_iter.next().unwrap() {
+                            TokenTree::Literal(v) => v,
+                            x => panic!("Expected a literal found {}", x),
+                        };
+
+                        match Lit::new(literal) {
+                            Lit::Str(v) => {
+                                method_ident = Ident::new(&v.value(), v.span());
+                                spreadable = true;
+                            },
+                            x => panic!("Expected string found {}", x.to_token_stream())
                         }
                     }
-                }
+                } 
             }
 
             (f.ident.clone().unwrap(), generic(&f.ty, "Option"), is_optional(&f.ty), spreadable, method_ident)
@@ -108,7 +117,7 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
 
     let mut builder_fields = quote!();
     let mut raw_builder_instance = quote!();
-    let mut entity_builder_implementation = quote!();
+    let mut builder_methods = quote!();
     let mut build_body = quote!();
 
     for (field_ident, ty, is_optional, spreadable, method_ident) in entity_fields {
@@ -121,7 +130,7 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
             #field_ident: None,
         });
 
-        entity_builder_implementation.extend({
+        builder_methods.extend({
             if spreadable {
                 let m_ty = generic(ty, "Vec");
                 quote! {
@@ -177,7 +186,7 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
         }
 
         impl #entity_builder_ident {
-            #entity_builder_implementation
+            #builder_methods
 
             pub fn build(&self) -> Result<#entity_ident, Box<dyn ::std::error::Error>> {
                 Ok(
@@ -210,7 +219,7 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
 
     let mut builder_fields = vec![];
     let mut raw_builder_instance = vec![];
-    let mut entity_builder_implementation = vec![];
+    let mut builder_methods = vec![];
     let mut build_body = vec![];
 
     for (ident, ty, is_optional) in entity_fields {
@@ -226,7 +235,7 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
             #field_ident: None
         });
 
-        entity_builder_implementation.push(quote! {
+        builder_methods.push(quote! {
             pub fn #field_ident(&mut self, v: #ty) -> &mut Self {
                 self.#field_ident = Some(v);
                 self
@@ -265,7 +274,7 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
         }
         
         impl #entity_builder_ident {
-            #(#entity_builder_implementation)*
+            #(#builder_methods)*
 
             pub fn build(&self) -> Result<#entity_ident, Box<dyn ::std::error::Error>> {
                 Ok(
