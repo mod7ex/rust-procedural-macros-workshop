@@ -1,6 +1,7 @@
 use core::panic;
 
 use proc_macro2::{TokenTree, Delimiter};
+use proc_macro_error::{abort, proc_macro_error};
 use quote::{quote, ToTokens};
 use proc_macro::TokenStream;
 use syn::{
@@ -47,6 +48,7 @@ fn generic<'a>(ty: &'a Type, target: &str) -> &'a Type {
     ty
 }
 
+#[proc_macro_error]
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(tokens: TokenStream) -> TokenStream {
     let tokens = parse_macro_input!(tokens as DeriveInput);
@@ -66,27 +68,40 @@ pub fn derive(tokens: TokenStream) -> TokenStream {
                 if let Some(TokenTree::Group(group)) = attr.to_token_stream().into_iter().last() {
 
                     let mut attr_tts = group.stream().into_iter();
+                    let attr_span = group.span().unwrap();
 
-                    match attr_tts.next().unwrap() {
-                        TokenTree::Ident(v) => {
-                            if v.to_string() != "builder" {
-                                continue;
-                            }
+                    if let Some( TokenTree::Ident(v)) = attr_tts.next() {
+                        if v.to_string() != "builder" {
+                            continue;
                         }
-                        _ => {}
                     }
 
-                    if let TokenTree::Group(group) = attr_tts.next().unwrap() {
+                    if let Some(TokenTree::Group(group)) = attr_tts.next() {
                         if group.delimiter() != Delimiter::Parenthesis {
                             panic!("Wrong usage, use parenthesis");
                         }
 
                         let mut stream_iter = group.stream().into_iter();
 
-                        match stream_iter.next().unwrap() {
-                            TokenTree::Ident(ref i) => assert_eq!(i.to_string(), "each"),
-                            x => panic!("Expected \"each\" found {}", x)
+                        let each = stream_iter.next();
+
+                        if let Some(TokenTree::Ident(ref i)) = each {
+                            if i.to_string() != "each" {
+                                abort!(attr_span, format!("Expected \"each\" found {}", i));
+                            }
+                        } else {
+                            abort!(attr_span, format!("Wrong usage \"each\" keyword should be specified"));
                         }
+
+                        /*
+                        match stream_iter.next().unwrap() {
+                            TokenTree::Ident(ref i) => {
+                                
+                                assert_eq!(i.to_string(), "each")
+                            },
+                            x => panic!()
+                        }
+                        */
 
                         match stream_iter.next().unwrap() {
                             TokenTree::Punct(ref i) => assert_eq!(i.as_char(), '='),
